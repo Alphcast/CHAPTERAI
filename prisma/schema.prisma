@@ -1,0 +1,161 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum ResearchMethodology {
+  QUANTITATIVE
+  QUALITATIVE
+  MIXED_METHODS
+  EXPERIMENTAL
+  SURVEY
+  CASE_STUDY
+  ACTION_RESEARCH
+  DESCRIPTIVE
+  CORRELATIONAL
+  COMPARATIVE
+  SYSTEMATIC_REVIEW
+}
+
+enum CitationStyle {
+  APA
+  MLA
+  CHICAGO
+  HARVARD
+  IEEE
+}
+
+enum AcademicLevel {
+  UNDERGRADUATE
+  MASTERS
+  PHD
+}
+
+enum ChapterStatus {
+  DRAFT
+  GENERATING
+  COMPLETE
+}
+
+enum AnalysisType {
+  QUANTITATIVE
+  QUALITATIVE
+  MIXED
+}
+
+/// Top-level research project container
+model Project {
+  id            String              @id @default(cuid())
+  title         String              @default("")
+  topic         String              @default("")
+  academicLevel AcademicLevel       @map("academic_level")
+  department    String              @default("")
+  institution   String              @default("")
+  country       String              @default("")
+  methodology   ResearchMethodology
+  citationStyle CitationStyle       @map("citation_style")
+  createdAt     DateTime            @default(now()) @map("created_at")
+  updatedAt     DateTime            @updatedAt @map("updated_at")
+
+  chapters   Chapter[]
+  messages   Message[]
+  analyses   Analysis[]
+  uploads    Upload[]
+  references Reference[]
+  exports    Export[]
+
+  @@map("project")
+}
+
+/// Individual chapter within a project
+model Chapter {
+  id            String        @id @default(cuid())
+  projectId     String        @map("project_id")
+  chapterNumber Int           @map("chapter_number")
+  title         String        @default("")
+  content       String        @default("")
+  status        ChapterStatus @default(DRAFT)
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, chapterNumber])
+  @@map("chapter")
+}
+
+/// Chat messages per project/chapter
+model Message {
+  id            String   @id @default(cuid())
+  projectId     String   @map("project_id")
+  chapterNumber Int      @default(1) @map("chapter_number")
+  role          String   @default("user")
+  content       String   @default("")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("message")
+}
+
+/// Saved quantitative/qualitative/mixed analysis runs
+model Analysis {
+  id        String       @id @default(cuid())
+  projectId String       @map("project_id")
+  type      AnalysisType
+  data      Json         @default("{}")
+  results   Json         @default("[]")
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("analysis")
+}
+
+/// File uploads (XLSX, CSV, PDF, DOCX) for analysis and context
+model Upload {
+  id        String   @id @default(cuid())
+  projectId String   @map("project_id")
+  filename  String   @default("")
+  fileUrl   String   @map("file_url") @default("")
+  fileType  String   @map("file_type") @default("")
+  fileSize  Int      @default(0) @map("file_size")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("upload")
+}
+
+/// Generated citations for the project
+model Reference {
+  id        String        @id @default(cuid())
+  projectId String        @map("project_id")
+  citation  String        @default("")
+  style     CitationStyle
+  source    String        @default("manual")
+  createdAt DateTime      @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("reference")
+}
+
+/// Exported document records (DOCX, PDF)
+model Export {
+  id        String   @id @default(cuid())
+  projectId String   @map("project_id")
+  format    String   @default("")
+  fileUrl   String   @map("file_url") @default("")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("export")
+}

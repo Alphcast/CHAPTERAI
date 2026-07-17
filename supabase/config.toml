@@ -1,0 +1,38 @@
+# ChapterAI — Supabase CLI configuration
+# Docs: https://supabase.com/docs/reference/cli/config
+
+[project]
+ref_id = "local"
+name = "chapterai"
+
+[api]
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public"]
+
+[db]
+port = 54322
+# The migration SQL files are stored in supabase/migrations/
+# and are applied automatically when running `supabase db push`.
+major_version = 15
+
+[studio]
+port = 54323
+
+[inbucket]
+port = 54324
+
+[auth]
+enabled = false  # No auth — public dashboard
+
+[storage]
+enabled = true
+file_size_limit = "50MB"
+
+[analytics]
+enabled = true
+port = 54325
+
+# -- Vector / pgvector (disabled by default)
+# [analytics.vector]
+# enabled = true
