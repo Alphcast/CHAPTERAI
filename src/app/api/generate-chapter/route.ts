@@ -1,8 +1,9 @@
-import { NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
-import { runChapterAgent, getAgentForChapter } from "@/agents"
+import { getChapterModel, createStreamResponse } from "@/lib/ai"
+import { getAgentForChapter } from "@/agents"
 import type { AgentContext } from "@/agents/types"
-import { getModel, createStreamResponse } from "@/lib/ai"
+
+export const runtime = "nodejs"
 
 export async function POST(request: Request) {
   try {
@@ -17,7 +18,10 @@ export async function POST(request: Request) {
     })
 
     if (!project) {
-      return NextResponse.json({ error: "Project not found" }, { status: 404 })
+      return new Response(
+        JSON.stringify({ type: "error", content: "Project not found" }),
+        { status: 404, headers: { "Content-Type": "application/json" } }
+      )
     }
 
     await prisma.chapter.updateMany({
@@ -37,7 +41,7 @@ export async function POST(request: Request) {
       chapterNumber,
     }
 
-    const model = getModel()
+    const model = getChapterModel()
 
     if (model) {
       const agent = getAgentForChapter(chapterNumber)
@@ -47,82 +51,120 @@ export async function POST(request: Request) {
 I am a ${project.academicLevel.toLowerCase()} student in ${project.department} at ${project.institution}.
 Methodology: ${project.methodology.replace(/_/g, " ")}.
 Citation: ${project.citationStyle} style.
-Generate comprehensive academic content with all required sections, properly formatted.`
+Generate comprehensive academic content with all required sections, properly formatted.
+
+CRITICAL CITATION REQUIREMENTS:
+- Every factual claim, theory, statistic, method, and finding MUST have an in-text citation (${project.citationStyle} format).
+- Every paragraph must contain 2-4 in-text citations. Never write a paragraph without citations.
+- Never write "Research shows..." without citing WHO showed it. Always: "According to Smith (2023)..." or "(Smith, 2023)".
+- End the chapter with a complete References section containing 20-30 entries.
+- Every in-text citation MUST have a matching Reference entry, and every Reference MUST be cited in-text.
+- Use realistic author names, journal names, years, DOIs, and page numbers.`
 
       const stream = createStreamResponse({
         model,
         system,
         prompt,
+        temperature: 0.7,
+        maxTokens: 8192,
       })
 
       if (stream) {
         let fullContent = ""
-        for await (const chunk of stream.fullStream) {
-          if (chunk.type === "text-delta" && chunk.textDelta) {
-            fullContent += chunk.textDelta
-          }
-        }
+        const encoder = new TextEncoder()
 
-        if (fullContent) {
-          await prisma.chapter.updateMany({
-            where: { projectId, chapterNumber },
-            data: { content: fullContent, status: "COMPLETE" },
-          })
+        const responseStream = new ReadableStream({
+          async start(controller) {
+            try {
+              for await (const chunk of stream.fullStream) {
+                if (chunk.type === "text-delta" && chunk.textDelta) {
+                  fullContent += chunk.textDelta
+                  controller.enqueue(
+                    encoder.encode(
+                      JSON.stringify({ type: "text", content: chunk.textDelta }) + "\n"
+                    )
+                  )
+                } else if (chunk.type === "error") {
+                  console.error("[Generate Chapter] Stream error:", JSON.stringify(chunk))
+                }
+              }
 
-          await prisma.message.create({
-            data: {
-              projectId,
-              chapterNumber,
-              role: "user",
-              content: `Generate complete Chapter ${chapterNumber}`,
-            },
-          })
+              if (fullContent) {
+                await prisma.chapter.updateMany({
+                  where: { projectId, chapterNumber },
+                  data: { content: fullContent, status: "COMPLETE" },
+                })
 
-          await prisma.message.create({
-            data: {
-              projectId,
-              chapterNumber,
-              role: "assistant",
-              content: fullContent,
-            },
-          })
+                await prisma.message.create({
+                  data: {
+                    projectId,
+                    chapterNumber,
+                    role: "user",
+                    content: `Generate complete Chapter ${chapterNumber}`,
+                  },
+                })
 
-          return NextResponse.json({ success: true, content: fullContent, chapterNumber })
-        }
+                await prisma.message.create({
+                  data: {
+                    projectId,
+                    chapterNumber,
+                    role: "assistant",
+                    content: fullContent,
+                  },
+                })
+              }
+
+              controller.enqueue(
+                encoder.encode(
+                  JSON.stringify({
+                    type: "done",
+                    chapterNumber,
+                    contentLength: fullContent.length,
+                  }) + "\n"
+                )
+              )
+              controller.close()
+            } catch (error) {
+              console.error("[Generate Chapter] Stream error:", error)
+              await prisma.chapter.updateMany({
+                where: { projectId, chapterNumber },
+                data: { status: "DRAFT" },
+              })
+              controller.enqueue(
+                encoder.encode(
+                  JSON.stringify({ type: "error", content: "Failed to generate chapter" }) + "\n"
+                )
+              )
+              controller.close()
+            }
+          },
+        })
+
+        return new Response(responseStream, {
+          headers: {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+          },
+        })
       }
     }
 
-    const { content } = await runChapterAgent(agentContext)
-
+    // Fallback: reset status
     await prisma.chapter.updateMany({
       where: { projectId, chapterNumber },
-      data: { content, status: "COMPLETE" },
+      data: { status: "DRAFT" },
     })
 
-    await prisma.message.create({
-      data: {
-        projectId,
-        chapterNumber,
-        role: "user",
-        content: `Generate complete Chapter ${chapterNumber}`,
-      },
-    })
-
-    await prisma.message.create({
-      data: {
-        projectId,
-        chapterNumber,
-        role: "assistant",
-        content,
-      },
-    })
-
-    return NextResponse.json({ success: true, content, chapterNumber })
+    return new Response(
+      JSON.stringify({ type: "error", content: "No AI model available" }),
+      { status: 503, headers: { "Content-Type": "application/json" } }
+    )
   } catch (error) {
-    console.error("Generate chapter error:", error)
-    return NextResponse.json(
-      { error: "Failed to generate chapter" },
-      { status: 500 }
+    console.error("[Generate Chapter] Fatal error:", error)
+    return new Response(
+      JSON.stringify({ type: "error", content: "Failed to generate chapter" }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
     )
   }
 }

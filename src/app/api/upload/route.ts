@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
-import { writeFile, mkdir } from "fs/promises"
-import { join } from "path"
+import { createSupabaseServerClient } from "@/lib/supabase/server"
 
 export async function POST(request: Request) {
   try {
@@ -17,17 +16,28 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "No project ID provided" }, { status: 400 })
     }
 
-    const bytes = await file.arrayBuffer()
-    const buffer = Buffer.from(bytes)
-
-    const uploadDir = join(process.cwd(), "public", "uploads", projectId)
-    await mkdir(uploadDir, { recursive: true })
+    const supabase = createSupabaseServerClient()
 
     const filename = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, "_")}`
-    const filepath = join(uploadDir, filename)
-    await writeFile(filepath, buffer)
+    const storagePath = `${projectId}/${filename}`
 
-    const fileUrl = `/uploads/${projectId}/${filename}`
+    const { error: uploadError } = await supabase.storage
+      .from("uploads")
+      .upload(storagePath, file, {
+        contentType: file.type,
+        upsert: false,
+      })
+
+    if (uploadError) {
+      console.error("Supabase upload error:", uploadError)
+      return NextResponse.json({ error: "Failed to upload file" }, { status: 500 })
+    }
+
+    const { data: urlData } = supabase.storage
+      .from("uploads")
+      .getPublicUrl(storagePath)
+
+    const fileUrl = urlData.publicUrl
 
     const upload = await prisma.upload.create({
       data: {

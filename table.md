@@ -1,430 +1,293 @@
-# ChapterAI — Database Setup Guide (Supabase)
+# ChapterAI — Supabase Table Editor Guide
 
-This guide walks you through creating the ChapterAI database **step by step** using the Supabase SQL Editor.
+## Quick Start: Paste SQL in Supabase SQL Editor
 
-> **Location:** Open your Supabase project → **SQL Editor** → paste each block and click **Run**.
-
----
-
-## Step 1 — Create Enums (Custom Data Types)
-
-Enums let us restrict fields to a fixed set of values. Run these **one at a time** in order.
-
-### 1.1 ResearchMethodology
+Go to **Supabase Dashboard → SQL Editor → New Query**, paste the entire block below, and click **Run**.
 
 ```sql
-CREATE TYPE "ResearchMethodology" AS ENUM (
-  'QUANTITATIVE',
-  'QUALITATIVE',
-  'MIXED_METHODS',
-  'EXPERIMENTAL',
-  'SURVEY',
-  'CASE_STUDY',
-  'ACTION_RESEARCH',
-  'DESCRIPTIVE',
-  'CORRELATIONAL',
-  'COMPARATIVE',
-  'SYSTEMATIC_REVIEW'
+-- ============================================
+-- ChapterAI Database Schema
+-- Paste this into Supabase SQL Editor → Run
+-- ============================================
+
+-- Enums
+CREATE TYPE academic_level AS ENUM ('UNDERGRADUATE', 'MASTERS', 'PHD');
+
+CREATE TYPE research_methodology AS ENUM (
+  'QUANTITATIVE', 'QUALITATIVE', 'MIXED_METHODS',
+  'EXPERIMENTAL', 'SURVEY', 'CASE_STUDY',
+  'ACTION_RESEARCH', 'DESCRIPTIVE', 'CORRELATIONAL',
+  'COMPARATIVE', 'SYSTEMATIC_REVIEW'
 );
-```
 
-This enum stores the 11 research methodologies available when creating a project (e.g., Quantitative, Qualitative, Mixed Methods).
+CREATE TYPE citation_style AS ENUM ('APA', 'MLA', 'CHICAGO', 'HARVARD', 'IEEE');
 
-### 1.2 CitationStyle
+CREATE TYPE chapter_status AS ENUM ('DRAFT', 'GENERATING', 'COMPLETE');
 
-```sql
-CREATE TYPE "CitationStyle" AS ENUM (
-  'APA',
-  'MLA',
-  'CHICAGO',
-  'HARVARD',
-  'IEEE'
+CREATE TYPE analysis_type AS ENUM ('QUANTITATIVE', 'QUALITATIVE', 'MIXED');
+
+-- ============================================
+-- Tables
+-- ============================================
+
+-- 1. Project (top-level container)
+CREATE TABLE project (
+  id            TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  title         TEXT NOT NULL DEFAULT '',
+  topic         TEXT NOT NULL DEFAULT '',
+  academic_level academic_level NOT NULL,
+  department    TEXT NOT NULL DEFAULT '',
+  institution   TEXT NOT NULL DEFAULT '',
+  country       TEXT NOT NULL DEFAULT '',
+  methodology   research_methodology NOT NULL,
+  citation_style citation_style NOT NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-```
 
-The 5 citation styles supported for references and chapter formatting.
-
-### 1.3 AcademicLevel
-
-```sql
-CREATE TYPE "AcademicLevel" AS ENUM (
-  'UNDERGRADUATE',
-  'MASTERS',
-  'PHD'
+-- 2. Chapter
+CREATE TABLE chapter (
+  id             TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  project_id     TEXT NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+  chapter_number INTEGER NOT NULL,
+  title          TEXT NOT NULL DEFAULT '',
+  content        TEXT NOT NULL DEFAULT '',
+  status         chapter_status NOT NULL DEFAULT 'DRAFT',
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (project_id, chapter_number)
 );
-```
 
-The academic level of the research project — affects writing style and complexity.
-
-### 1.4 ChapterStatus
-
-```sql
-CREATE TYPE "ChapterStatus" AS ENUM (
-  'DRAFT',
-  'GENERATING',
-  'COMPLETE'
+-- 3. Message
+CREATE TABLE message (
+  id             TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  project_id     TEXT NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+  chapter_number INTEGER NOT NULL DEFAULT 1,
+  role           TEXT NOT NULL DEFAULT 'user',
+  content        TEXT NOT NULL DEFAULT '',
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-```
 
-Tracks chapter writing progress. Chapters start as `DRAFT`, switch to `GENERATING` while the AI writes them, and become `COMPLETE` when done.
-
-### 1.5 AnalysisType
-
-```sql
-CREATE TYPE "AnalysisType" AS ENUM (
-  'QUANTITATIVE',
-  'QUALITATIVE',
-  'MIXED'
+-- 4. Analysis
+CREATE TABLE analysis (
+  id         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  project_id TEXT NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+  type       analysis_type NOT NULL,
+  data       JSONB NOT NULL DEFAULT '{}',
+  results    JSONB NOT NULL DEFAULT '[]',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-```
 
-Used by the analysis feature to tag whether an analysis run is quantitative, qualitative, or mixed methods.
-
----
-
-## Step 2 — Create Tables (in dependency order)
-
-Tables with foreign keys must be created **after** the tables they reference.
-
-### 2.1 project (parent table)
-
-```sql
-CREATE TABLE "project" (
-  "id"              TEXT                  PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
-  "title"           TEXT                  NOT NULL DEFAULT '',
-  "topic"           TEXT                  NOT NULL DEFAULT '',
-  "academic_level"  "AcademicLevel"       NOT NULL DEFAULT 'UNDERGRADUATE',
-  "department"      TEXT                  NOT NULL DEFAULT '',
-  "institution"     TEXT                  NOT NULL DEFAULT '',
-  "country"         TEXT                  NOT NULL DEFAULT '',
-  "methodology"     "ResearchMethodology" NOT NULL DEFAULT 'QUANTITATIVE',
-  "citation_style"  "CitationStyle"       NOT NULL DEFAULT 'APA',
-  "created_at"      TIMESTAMPTZ          NOT NULL DEFAULT now(),
-  "updated_at"      TIMESTAMPTZ          NOT NULL DEFAULT now()
+-- 5. Upload
+CREATE TABLE upload (
+  id         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  project_id TEXT NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+  filename   TEXT NOT NULL DEFAULT '',
+  file_url   TEXT NOT NULL DEFAULT '',
+  file_type  TEXT NOT NULL DEFAULT '',
+  file_size  INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-```
 
-**What it stores:** One row per research project. Every other table references this table.
-
-**Key columns:**
-- `id` — auto-generated unique ID
-- `topic` — the research topic entered by the user
-- `academic_level` — controls AI writing tone (undergrad/masters/PhD)
-- `methodology` — affects chapter content generation
-- `citation_style` — APA/MLA/Chicago/Harvard/IEEE
-
----
-
-### 2.2 chapter
-
-```sql
-CREATE TABLE "chapter" (
-  "id"              TEXT             PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
-  "project_id"      TEXT             NOT NULL REFERENCES "project"("id") ON DELETE CASCADE,
-  "chapter_number"  INT              NOT NULL,
-  "title"           TEXT             NOT NULL DEFAULT '',
-  "content"         TEXT             NOT NULL DEFAULT '',
-  "status"          "ChapterStatus"  NOT NULL DEFAULT 'DRAFT',
-  "created_at"      TIMESTAMPTZ     NOT NULL DEFAULT now(),
-  "updated_at"      TIMESTAMPTZ     NOT NULL DEFAULT now(),
-  CONSTRAINT "unique_project_chapter" UNIQUE ("project_id", "chapter_number")
+-- 6. Reference
+CREATE TABLE reference (
+  id         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  project_id TEXT NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+  citation   TEXT NOT NULL DEFAULT '',
+  style      citation_style NOT NULL,
+  source     TEXT NOT NULL DEFAULT 'manual',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-```
 
-**What it stores:** The 7 chapters per project (Introduction through Appendices). Each project can have at most one chapter per number.
-
-**Important:** `ON DELETE CASCADE` means deleting a project also deletes all its chapters.
-
----
-
-### 2.3 message
-
-```sql
-CREATE TABLE "message" (
-  "id"              TEXT         PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
-  "project_id"      TEXT         NOT NULL REFERENCES "project"("id") ON DELETE CASCADE,
-  "chapter_number"  INT          NOT NULL DEFAULT 1,
-  "role"            TEXT         NOT NULL DEFAULT 'user',
-  "content"         TEXT         NOT NULL DEFAULT '',
-  "created_at"      TIMESTAMPTZ NOT NULL DEFAULT now()
+-- 7. Export
+CREATE TABLE export (
+  id         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  project_id TEXT NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+  format     TEXT NOT NULL DEFAULT '',
+  file_url   TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-```
 
-**What it stores:** Chat messages between the user and the AI assistant. Used for the streaming chat interface.
+-- ============================================
+-- Indexes for performance
+-- ============================================
+CREATE INDEX idx_chapter_project     ON chapter(project_id);
+CREATE INDEX idx_message_project     ON message(project_id);
+CREATE INDEX idx_analysis_project    ON analysis(project_id);
+CREATE INDEX idx_upload_project      ON upload(project_id);
+CREATE INDEX idx_reference_project   ON reference(project_id);
+CREATE INDEX idx_export_project      ON export(project_id);
 
-**Key columns:**
-- `role` — `'user'` or `'assistant'`
-- `chapter_number` — which chapter the message belongs to
-- `content` — the actual message text
-
----
-
-### 2.4 analysis
-
-```sql
-CREATE TABLE "analysis" (
-  "id"              TEXT           PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
-  "project_id"      TEXT           NOT NULL REFERENCES "project"("id") ON DELETE CASCADE,
-  "type"            "AnalysisType" NOT NULL,
-  "data"            JSONB         NOT NULL DEFAULT '{}'::JSONB,
-  "results"         JSONB         NOT NULL DEFAULT '[]'::JSONB,
-  "created_at"      TIMESTAMPTZ   NOT NULL DEFAULT now(),
-  "updated_at"      TIMESTAMPTZ   NOT NULL DEFAULT now()
-);
-```
-
-**What it stores:** Saved analysis runs. When a user uploads data and runs statistical tests, the inputs and results are saved here.
-
-**Key columns:**
-- `type` — quantitative, qualitative, or mixed
-- `data` — JSON containing the analysis input (e.g., column selections, test parameters)
-- `results` — JSON array of result objects (e.g., correlation coefficients, p-values)
-
----
-
-### 2.5 upload
-
-```sql
-CREATE TABLE "upload" (
-  "id"              TEXT         PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
-  "project_id"      TEXT         NOT NULL REFERENCES "project"("id") ON DELETE CASCADE,
-  "filename"        TEXT         NOT NULL DEFAULT '',
-  "file_url"        TEXT         NOT NULL DEFAULT '',
-  "file_type"       TEXT         NOT NULL DEFAULT '',
-  "created_at"      TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-```
-
-**What it stores:** Records of uploaded files (XLSX, CSV) for data analysis. The actual file is stored in Supabase Storage; this table tracks the reference.
-
----
-
-### 2.6 reference
-
-```sql
-CREATE TABLE "reference" (
-  "id"              TEXT            PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
-  "project_id"      TEXT            NOT NULL REFERENCES "project"("id") ON DELETE CASCADE,
-  "citation"        TEXT            NOT NULL DEFAULT '',
-  "style"           "CitationStyle" NOT NULL DEFAULT 'APA',
-  "source"          TEXT            NOT NULL DEFAULT 'manual',
-  "created_at"      TIMESTAMPTZ    NOT NULL DEFAULT now()
-);
-```
-
-**What it stores:** Auto-generated citations for the project. The AI agent creates these when writing chapters.
-
-**Key columns:**
-- `citation` — the full formatted citation text
-- `style` — APA/MLA/Chicago/Harvard/IEEE
-- `source` — `'generated'` (by AI) or `'manual'` (user-added)
-
----
-
-### 2.7 export
-
-```sql
-CREATE TABLE "export" (
-  "id"              TEXT         PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
-  "project_id"      TEXT         NOT NULL REFERENCES "project"("id") ON DELETE CASCADE,
-  "format"          TEXT         NOT NULL DEFAULT '',
-  "file_url"        TEXT         NOT NULL DEFAULT '',
-  "created_at"      TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-```
-
-**What it stores:** Records of exported documents (DOCX, PDF) so users can download them later.
-
----
-
-## Step 3 — Create Indexes
-
-Indexes speed up queries. Run these all at once (they're independent).
-
-```sql
-CREATE INDEX "idx_chapter_project_id"    ON "chapter"("project_id");
-CREATE INDEX "idx_message_project_id"    ON "message"("project_id");
-CREATE INDEX "idx_message_chapter"       ON "message"("project_id", "chapter_number");
-CREATE INDEX "idx_analysis_project_id"   ON "analysis"("project_id");
-CREATE INDEX "idx_upload_project_id"     ON "upload"("project_id");
-CREATE INDEX "idx_reference_project_id"  ON "reference"("project_id");
-CREATE INDEX "idx_export_project_id"     ON "export"("project_id");
-CREATE INDEX "idx_project_updated_at"    ON "project"("updated_at" DESC);
-CREATE INDEX "idx_chapter_status"        ON "chapter"("project_id", "status");
-```
-
-**What they do:** Every foreign key column gets an index (so JOINs are fast). The `updated_at` index sorts projects by last modified. The `chapter_status` index helps the dashboard quickly count generated chapters.
-
----
-
-## Step 4 — Create `updated_at` Trigger
-
-This automatically updates the `updated_at` column whenever a row changes. Without it, you'd have to manually set `updated_at` in every UPDATE query.
-
-### 4.1 Create the trigger function (run once)
-
-```sql
-CREATE OR REPLACE FUNCTION "update_updated_at_column"()
+-- ============================================
+-- Auto-update updated_at trigger
+-- ============================================
+CREATE OR REPLACE FUNCTION update_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
-  NEW."updated_at" = now();
+  NEW.updated_at = now();
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
-```
 
-### 4.2 Attach triggers to tables
+CREATE TRIGGER trg_project_updated BEFORE UPDATE ON project
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
-```sql
-CREATE TRIGGER "set_project_updated_at"
-  BEFORE UPDATE ON "project"
-  FOR EACH ROW EXECUTE FUNCTION "update_updated_at_column"();
+CREATE TRIGGER trg_chapter_updated BEFORE UPDATE ON chapter
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
-CREATE TRIGGER "set_chapter_updated_at"
-  BEFORE UPDATE ON "chapter"
-  FOR EACH ROW EXECUTE FUNCTION "update_updated_at_column"();
-
-CREATE TRIGGER "set_analysis_updated_at"
-  BEFORE UPDATE ON "analysis"
-  FOR EACH ROW EXECUTE FUNCTION "update_updated_at_column"();
-```
-
-Note: `message`, `upload`, `reference`, and `export` don't have `updated_at` columns (they're append-only), so no triggers needed.
-
----
-
-## Step 5 — Row Level Security (RLS)
-
-ChapterAI is a **public dashboard** with no user logins. RLS is enabled so that when authentication is added later, you just swap the policies — no schema changes needed.
-
-### 5.1 Enable RLS on every table
-
-```sql
-ALTER TABLE "project"   ENABLE ROW LEVEL SECURITY;
-ALTER TABLE "chapter"   ENABLE ROW LEVEL SECURITY;
-ALTER TABLE "message"   ENABLE ROW LEVEL SECURITY;
-ALTER TABLE "analysis"  ENABLE ROW LEVEL SECURITY;
-ALTER TABLE "upload"    ENABLE ROW LEVEL SECURITY;
-ALTER TABLE "reference" ENABLE ROW LEVEL SECURITY;
-ALTER TABLE "export"    ENABLE ROW LEVEL SECURITY;
-```
-
-### 5.2 Grant full public access
-
-```sql
-CREATE POLICY "Public full access" ON "project"   FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Public full access" ON "chapter"   FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Public full access" ON "message"   FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Public full access" ON "analysis"  FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Public full access" ON "upload"    FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Public full access" ON "reference" FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Public full access" ON "export"    FOR ALL USING (true) WITH CHECK (true);
-```
-
-These policies allow anyone to SELECT, INSERT, UPDATE, and DELETE without authentication. When you add auth later, replace `USING (true)` with `USING (auth.uid() = project_id)` or similar.
-
----
-
-## Step 6 — Seed Data (Optional)
-
-This inserts sample projects so you can test the app immediately. Only run after all tables exist.
-
-### 6.1 Sample Project 1 — Quantitative
-
-```sql
-INSERT INTO "project" ("id", "title", "topic", "academic_level", "department", "institution", "country", "methodology", "citation_style", "created_at", "updated_at")
-VALUES (
-  'p_sample_001',
-  'Impact of Social Media on Student Academic Performance',
-  'The Impact of Social Media Usage on the Academic Performance of Undergraduate Students in Nigerian Universities',
-  'UNDERGRADUATE',
-  'Computer Science',
-  'University of Lagos',
-  'Nigeria',
-  'QUANTITATIVE',
-  'APA',
-  '2026-06-01T10:00:00Z',
-  '2026-06-15T14:30:00Z'
-);
-```
-
-### 6.2 Chapters for Project 1
-
-```sql
-INSERT INTO "chapter" ("id", "project_id", "chapter_number", "title", "content", "status", "created_at", "updated_at") VALUES
-  ('ch_sample_001_1', 'p_sample_001', 1, 'Introduction', 'Social media has become an integral part of daily life for university students...', 'COMPLETE', '2026-06-05T08:00:00Z', '2026-06-05T08:00:00Z'),
-  ('ch_sample_001_2', 'p_sample_001', 2, 'Literature Review', 'The relationship between social media usage and academic performance has been extensively studied...', 'COMPLETE', '2026-06-07T10:00:00Z', '2026-06-07T10:00:00Z'),
-  ('ch_sample_001_3', 'p_sample_001', 3, 'Methodology', 'This study employs a quantitative research design using a cross-sectional survey approach...', 'COMPLETE', '2026-06-09T09:00:00Z', '2026-06-09T09:00:00Z'),
-  ('ch_sample_001_4', 'p_sample_001', 4, 'Data Analysis', 'This chapter presents the analysis of data collected from 200 undergraduate students...', 'COMPLETE', '2026-06-11T11:00:00Z', '2026-06-11T11:00:00Z'),
-  ('ch_sample_001_5', 'p_sample_001', 5, 'Summary and Conclusion', 'This study investigated the impact of social media usage on the academic performance...', 'COMPLETE', '2026-06-13T08:00:00Z', '2026-06-13T08:00:00Z');
-```
-
-### 6.3 Messages for Project 1
-
-```sql
-INSERT INTO "message" ("id", "project_id", "chapter_number", "role", "content", "created_at") VALUES
-  ('msg_sample_001_1', 'p_sample_001', 1, 'user',     'Help me write the introduction for my research on social media and academic performance.',                    '2026-06-04T08:00:00Z'),
-  ('msg_sample_001_2', 'p_sample_001', 1, 'assistant', 'I''ll help you write Chapter 1 (Introduction). Let me start with the background of the study, problem statement, and research objectives.', '2026-06-04T08:01:00Z');
-```
-
-### 6.4 References for Project 1
-
-```sql
-INSERT INTO "reference" ("id", "project_id", "citation", "style", "source", "created_at") VALUES
-  ('ref_sample_001_1', 'p_sample_001', 'Junco, R. (2012). The relationship between frequency of Facebook use, participation in Facebook activities, and student engagement. Computers & Education, 58(1), 162-171.', 'APA', 'generated', '2026-06-15T10:00:00Z'),
-  ('ref_sample_001_2', 'p_sample_001', 'Kirschner, P. A., & Karpinski, A. C. (2010). Facebook and academic performance. Computers in Human Behavior, 26(6), 1237-1245.', 'APA', 'generated', '2026-06-15T10:00:00Z'),
-  ('ref_sample_001_3', 'p_sample_001', 'Tess, P. A. (2013). The role of social media in higher education classes. Computers & Education, 62, 146-162.', 'APA', 'generated', '2026-06-15T10:00:00Z'),
-  ('ref_sample_001_4', 'p_sample_001', 'Adeyinka, T., & Mutula, S. (2019). Social media and academic performance: A study of Nigerian universities. Journal of Information Science, 45(3), 345-358.', 'APA', 'generated', '2026-06-15T10:00:00Z'),
-  ('ref_sample_001_5', 'p_sample_001', 'Katz, E., Blumler, J. G., & Gurevitch, M. (1973). Uses and gratifications research. Public Opinion Quarterly, 37(4), 509-523.', 'APA', 'generated', '2026-06-15T10:00:00Z');
-```
-
-### 6.5 Sample Project 2 — Qualitative (shorter demo)
-
-```sql
-INSERT INTO "project" ("id", "title", "topic", "academic_level", "department", "institution", "country", "methodology", "citation_style", "created_at", "updated_at")
-VALUES (
-  'p_sample_002',
-  'Teacher Perceptions of AI in Education',
-  'Exploring Teacher Perceptions of Artificial Intelligence Integration in Secondary School Classrooms',
-  'MASTERS',
-  'Education',
-  'University of Cape Town',
-  'South Africa',
-  'QUALITATIVE',
-  'APA',
-  '2026-06-10T09:00:00Z',
-  '2026-06-12T16:00:00Z'
-);
-
-INSERT INTO "chapter" ("id", "project_id", "chapter_number", "title", "content", "status", "created_at", "updated_at") VALUES
-  ('ch_sample_002_1', 'p_sample_002', 1, 'Introduction', 'Artificial intelligence (AI) is transforming educational landscapes globally...', 'COMPLETE', '2026-06-12T08:00:00Z', '2026-06-12T08:00:00Z'),
-  ('ch_sample_002_2', 'p_sample_002', 2, 'Literature Review', 'The integration of AI in education has been a topic of growing scholarly interest...', 'DRAFT', '2026-06-12T10:00:00Z', '2026-06-12T10:00:00Z'),
-  ('ch_sample_002_3', 'p_sample_002', 3, 'Methodology', 'This study adopts a qualitative phenomenological research design...', 'DRAFT', '2026-06-12T14:00:00Z', '2026-06-12T14:00:00Z');
+CREATE TRIGGER trg_analysis_updated BEFORE UPDATE ON analysis
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 ```
 
 ---
 
-## Visual Summary
+## Creating Tables One-by-One in Table Editor
+
+If you prefer the visual Table Editor (not SQL), create tables in this order due to foreign keys:
+
+### Step 1: Create `project` table first
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | text | Primary key, default `gen_random_uuid()` |
+| title | text | Default `''` |
+| topic | text | Default `''` |
+| academic_level | enum | Options: UNDERGRADUATE, MASTERS, PHD |
+| department | text | Default `''` |
+| institution | text | Default `''` |
+| country | text | Default `''` |
+| methodology | enum | See list above |
+| citation_style | enum | APA, MLA, CHICAGO, HARVARD, IEEE |
+| created_at | timestamptz | Default `now()` |
+| updated_at | timestamptz | Default `now()` |
+
+### Step 2: Create `chapter` table
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | text | Primary key, default `gen_random_uuid()` |
+| project_id | text | Foreign key → project(id), ON DELETE CASCADE |
+| chapter_number | int4 | Unique with project_id |
+| title | text | Default `''` |
+| content | text | Default `''` |
+| status | enum | DRAFT, GENERATING, COMPLETE |
+| created_at | timestamptz | Default `now()` |
+| updated_at | timestamptz | Default `now()` |
+
+### Step 3: Create `message` table
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | text | Primary key, default `gen_random_uuid()` |
+| project_id | text | Foreign key → project(id), ON DELETE CASCADE |
+| chapter_number | int4 | Default `1` |
+| role | text | Default `'user'` |
+| content | text | Default `''` |
+| created_at | timestamptz | Default `now()` |
+
+### Step 4: Create `analysis` table
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | text | Primary key, default `gen_random_uuid()` |
+| project_id | text | Foreign key → project(id), ON DELETE CASCADE |
+| type | enum | QUANTITATIVE, QUALITATIVE, MIXED |
+| data | jsonb | Default `'{}'` |
+| results | jsonb | Default `'[]'` |
+| created_at | timestamptz | Default `now()` |
+| updated_at | timestamptz | Default `now()` |
+
+### Step 5: Create `upload` table
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | text | Primary key, default `gen_random_uuid()` |
+| project_id | text | Foreign key → project(id), ON DELETE CASCADE |
+| filename | text | Default `''` |
+| file_url | text | Default `''` |
+| file_type | text | Default `''` |
+| file_size | int4 | Default `0` |
+| created_at | timestamptz | Default `now()` |
+
+### Step 6: Create `reference` table
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | text | Primary key, default `gen_random_uuid()` |
+| project_id | text | Foreign key → project(id), ON DELETE CASCADE |
+| citation | text | Default `''` |
+| style | enum | APA, MLA, CHICAGO, HARVARD, IEEE |
+| source | text | Default `'manual'` |
+| created_at | timestamptz | Default `now()` |
+
+### Step 7: Create `export` table
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | text | Primary key, default `gen_random_uuid()` |
+| project_id | text | Foreign key → project(id), ON DELETE CASCADE |
+| format | text | Default `''` |
+| file_url | text | Default `''` |
+| created_at | timestamptz | Default `now()` |
+
+---
+
+## AI Prompt for Supabase SQL Editor
+
+Paste this prompt into the Supabase SQL Editor AI assistant:
 
 ```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   project   │────→│   chapter   │     │   message   │
-│  (parent)   │     │  1 per num  │     │ chat per    │
-└──────┬──────┘     │  /project   │     │ chapter     │
-       │            └─────────────┘     └─────────────┘
-       │                   
-       │            ┌─────────────┐     ┌─────────────┐
-       ├───────────→│  analysis   │     │   upload    │
-       │            │ results+    │     │ file refs   │
-       │            │ data json   │     └─────────────┘
-       │            └─────────────┘
-       │                    
-       │            ┌─────────────┐     ┌─────────────┐
-       ├───────────→│  reference  │     │   export    │
-       │            │ citations   │     │ docx/pdf    │
-       │            └─────────────┘     └─────────────┘
-       │
-       └──── 6 child tables, all ON DELETE CASCADE
+Create the full ChapterAI database with these 7 tables.
+All IDs are TEXT using gen_random_uuid().
+All foreign keys reference project(id) with ON DELETE CASCADE.
+Use custom ENUM types for academic_level, research_methodology,
+citation_style, chapter_status, and analysis_type.
+
+Tables:
+1. project: id, title, topic, academic_level, department, institution,
+   country, methodology, citation_style, created_at, updated_at
+
+2. chapter: id, project_id (FK), chapter_number, title, content, status,
+   created_at, updated_at. Unique constraint on (project_id, chapter_number).
+
+3. message: id, project_id (FK), chapter_number, role, content, created_at
+
+4. analysis: id, project_id (FK), type, data (jsonb), results (jsonb),
+   created_at, updated_at
+
+5. upload: id, project_id (FK), filename, file_url, file_type, file_size,
+   created_at
+
+6. reference: id, project_id (FK), citation, style, source, created_at
+
+7. export: id, project_id (FK), format, file_url, created_at
+
+Add indexes on all project_id foreign keys.
+Add auto-update triggers for updated_at on project, chapter, and analysis.
 ```
 
-Each arrow represents a `project_id` foreign key. Deleting a project removes all related rows automatically.
+---
+
+## Row Level Security (RLS) — Optional
+
+If you want to enable RLS, run this after creating tables:
+
+```sql
+ALTER TABLE project ENABLE ROW LEVEL SECURITY;
+ALTER TABLE chapter ENABLE ROW LEVEL SECURITY;
+ALTER TABLE message ENABLE ROW LEVEL SECURITY;
+ALTER TABLE analysis ENABLE ROW LEVEL SECURITY;
+ALTER TABLE upload ENABLE ROW LEVEL SECURITY;
+ALTER TABLE reference ENABLE ROW LEVEL SECURITY;
+ALTER TABLE export ENABLE ROW LEVEL SECURITY;
+
+-- Allow all operations for anon (public dashboard, no auth)
+CREATE POLICY "Allow all for anon" ON project FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all for anon" ON chapter FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all for anon" ON message FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all for anon" ON analysis FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all for anon" ON upload FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all for anon" ON reference FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all for anon" ON export FOR ALL USING (true) WITH CHECK (true);
+```

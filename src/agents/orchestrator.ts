@@ -58,7 +58,7 @@ export async function runChapterAgent(
     context,
     prompt: `Generate the complete content for Chapter ${context.chapterNumber} of my research on "${context.topic}". 
 Use ${context.citationStyle} style. I am a ${context.academicLevel.toLowerCase()} student in ${context.department}.`,
-    options: { useTools: true, temperature: 0.7, maxTokens: 4096 },
+    options: { useTools: true, temperature: 0.7, maxTokens: 8192, model: "chapter" },
   })
 }
 

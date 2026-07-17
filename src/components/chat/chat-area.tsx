@@ -4,6 +4,8 @@ import { useState, useRef, useEffect, useCallback } from "react"
 import { Send, Bot, User, Sparkles, StopCircle, Loader2, Copy, Check, Pencil, Trash2, RefreshCw, X, CheckCheck } from "lucide-react"
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"
 import { toast } from "sonner"
+import Markdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 import type { Message } from "@/types"
 import { cn } from "@/lib/utils"
 
@@ -274,27 +276,50 @@ export function ChatArea({ projectId, chapterNumber }: ChatAreaProps) {
   const suggestions = suggestionButtons[chapterNumber] || ["Generate content for this chapter"]
 
   const renderContent = (content: string) => {
-    const parts = content.split(/(```[\s\S]*?```)/g)
-    return parts.map((part, i) => {
-      if (part.startsWith("```")) {
-        const code = part.replace(/```[\w]*\n?/, "").replace(/\n?```$/, "")
-        const lang = part.match(/```(\w*)/)?.[1] || ""
-        return (
-          <pre key={i} className="my-2 rounded-lg bg-muted p-4 overflow-x-auto text-xs">
-            <div className="text-[10px] text-muted-foreground mb-1 uppercase">{lang || "code"}</div>
-            <code>{code}</code>
-          </pre>
-        )
-      }
-      const lines = part.split("\n").filter(Boolean)
-      return (
-        <div key={i} className="space-y-1">
-          {lines.map((line, j) => (
-            <p key={j}>{line}</p>
-          ))}
-        </div>
-      )
-    })
+    return (
+      <Markdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          h1: ({ children }) => <h1 className="text-xl font-bold mt-4 mb-2">{children}</h1>,
+          h2: ({ children }) => <h2 className="text-lg font-bold mt-3 mb-2">{children}</h2>,
+          h3: ({ children }) => <h3 className="text-base font-semibold mt-3 mb-1">{children}</h3>,
+          h4: ({ children }) => <h4 className="text-sm font-semibold mt-2 mb-1">{children}</h4>,
+          p: ({ children }) => <p className="mb-2 leading-relaxed">{children}</p>,
+          ul: ({ children }) => <ul className="list-disc pl-6 mb-2 space-y-1">{children}</ul>,
+          ol: ({ children }) => <ol className="list-decimal pl-6 mb-2 space-y-1">{children}</ol>,
+          li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+          blockquote: ({ children }) => (
+            <blockquote className="border-l-4 border-primary/30 pl-4 italic my-2 text-muted-foreground">{children}</blockquote>
+          ),
+          table: ({ children }) => (
+            <div className="overflow-x-auto my-3 rounded-lg border">
+              <table className="w-full text-sm">{children}</table>
+            </div>
+          ),
+          thead: ({ children }) => <thead className="bg-muted/50">{children}</thead>,
+          th: ({ children }) => <th className="px-3 py-2 text-left font-medium border-b">{children}</th>,
+          td: ({ children }) => <td className="px-3 py-2 border-b">{children}</td>,
+          code: ({ className, children, ...props }) => {
+            const isInline = !className
+            if (isInline) {
+              return <code className="rounded bg-muted px-1.5 py-0.5 text-sm font-mono" {...props}>{children}</code>
+            }
+            return <code className={className} {...props}>{children}</code>
+          },
+          pre: ({ children }) => (
+            <pre className="my-2 rounded-lg bg-muted p-4 overflow-x-auto text-xs">{children}</pre>
+          ),
+          a: ({ href, children }) => (
+            <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2 hover:text-primary/80">{children}</a>
+          ),
+          strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+          em: ({ children }) => <em className="italic">{children}</em>,
+          hr: () => <hr className="my-4 border-muted" />,
+        }}
+      >
+        {content}
+      </Markdown>
+    )
   }
 
   const formatTime = (dateStr: string) => {
@@ -389,8 +414,8 @@ export function ChatArea({ projectId, chapterNumber }: ChatAreaProps) {
                   </div>
                 </div>
               ) : (
-                <div className="text-sm leading-relaxed whitespace-pre-wrap">
-                  {renderContent(msg.content)}
+                <div className="text-sm leading-relaxed">
+                  {msg.role === "assistant" ? renderContent(msg.content) : <div className="whitespace-pre-wrap">{msg.content}</div>}
                 </div>
               )}
 

@@ -1,4 +1,4 @@
-import { getModel, createStreamResponse } from "@/lib/ai"
+import { getChatModel, getChapterModel, createStreamResponse } from "@/lib/ai"
 import type { Agent, AgentInput, AgentOutput, AgentTool, ToolCall, AgentContext } from "./types"
 
 export function createAgent(params: {
@@ -16,10 +16,19 @@ export function createAgent(params: {
     tools: params.tools || [],
     async run(input: AgentInput): Promise<AgentOutput> {
       const { context, prompt, options } = input
-      const system = this.systemPrompt(context as AgentContext)
+      const agentCtx = context as AgentContext
+      let system = this.systemPrompt(agentCtx)
       const toolCalls: ToolCall[] = []
 
-      const model = getModel()
+      // Inject prior chapter content so agents can reference and build upon prior work
+      if (agentCtx.generatedChapters && Object.keys(agentCtx.generatedChapters).length > 0) {
+        const chaptersContext = Object.entries(agentCtx.generatedChapters)
+          .map(([num, content]) => `--- Chapter ${num} (prior work, for reference only — do not repeat) ---\n${content}`)
+          .join("\n\n")
+        system += `\n\nPRIOR CHAPTERS ALREADY GENERATED (for context and cross-referencing — maintain consistency with these):\n${chaptersContext}`
+      }
+
+      const model = options?.model === "chapter" ? getChapterModel() : getChatModel()
 
       if (model) {
         const toolUseInstructions = this.tools.length > 0
@@ -32,6 +41,8 @@ export function createAgent(params: {
           model,
           system: finalSystem,
           prompt: `${prompt}\n\n${options?.useTools !== false && this.tools.length > 0 ? "Use available tools when appropriate to enhance your response." : ""}`,
+          temperature: options?.temperature ?? 0.7,
+          maxTokens: options?.maxTokens ?? 4096,
         })
 
         if (stream) {

@@ -23,6 +23,7 @@ export interface AgentInput {
     temperature?: number
     maxTokens?: number
     useTools?: boolean
+    model?: "chat" | "chapter"
   }
 }
 
