@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma"
 import { getChatModel, getChapterModel, createStreamResponse } from "@/lib/ai"
 import { processUserPrompt, getAgentForChapter } from "@/agents"
 import type { AgentContext } from "@/agents/types"
+import { fetchAndParseProjectUploads, formatUploadsForPrompt } from "@/lib/file-parser"
 
 export const runtime = "nodejs"
 
@@ -71,12 +72,20 @@ export async function POST(request: Request) {
 
     let prompt = content
 
+    // For Chapter 4 (Analysis), fetch and parse uploaded research data files
+    let uploadDataText = ""
+    if (chapterNumber === 4) {
+      const uploads = await fetchAndParseProjectUploads(projectId)
+      uploadDataText = formatUploadsForPrompt(uploads)
+    }
+
     if (isFullChapterRequest) {
       prompt = `Generate the complete content for Chapter ${chapterNumber} of my research on "${project.topic}".
 Use ${project.citationStyle} citation style throughout.
 I am a ${project.academicLevel.toLowerCase()} student in ${project.department} at ${project.institution}.
 My research uses ${project.methodology.replace(/_/g, " ")} methodology.
 Please generate comprehensive, well-structured academic content with all required sections properly formatted.
+${uploadDataText}
 
 CRITICAL CITATION REQUIREMENTS:
 - Every factual claim, theory, statistic, method, and finding MUST have an in-text citation (${project.citationStyle} format).
@@ -84,7 +93,13 @@ CRITICAL CITATION REQUIREMENTS:
 - Never write "Research shows..." without citing WHO showed it. Always: "According to Smith (2023)..." or "(Smith, 2023)".
 - End the chapter with a complete References section containing 20-30 entries.
 - Every in-text citation MUST have a matching Reference entry, and every Reference MUST be cited in-text.
-- Use realistic author names, journal names, years, DOIs, and page numbers.`
+- Use realistic author names, journal names, years, DOIs, and page numbers.
+
+IMPORTANT: Use the uploaded research data above to analyze, interpret, and discuss real findings. Reference specific data points, statistics, and patterns from the uploaded files.`
+    } else if (chapterNumber === 4 && uploadDataText) {
+      prompt = `${content}${uploadDataText}
+
+Analyze, interpret, and discuss the above uploaded data in your response. Reference specific findings from the data.`
     }
 
     // Use gpt-4o for full chapter generation, gpt-4o-mini for regular chat
@@ -161,7 +176,10 @@ CRITICAL CITATION REQUIREMENTS:
     }
 
     // Fallback: agent chain without streaming
-    const { content: agentResponse } = await processUserPrompt(agentContext, content)
+    const fallbackPrompt = chapterNumber === 4 && uploadDataText
+      ? `${prompt}${uploadDataText}`
+      : prompt
+    const { content: agentResponse } = await processUserPrompt(agentContext, fallbackPrompt)
 
     if (isFullChapterRequest) {
       await prisma.chapter.updateMany({

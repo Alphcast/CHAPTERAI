@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma"
 import { getChapterModel, createStreamResponse } from "@/lib/ai"
 import { getAgentForChapter } from "@/agents"
 import type { AgentContext } from "@/agents/types"
+import { fetchAndParseProjectUploads, formatUploadsForPrompt } from "@/lib/file-parser"
 
 export const runtime = "nodejs"
 
@@ -47,11 +48,19 @@ export async function POST(request: Request) {
       const agent = getAgentForChapter(chapterNumber)
       const system = agent.systemPrompt(agentContext)
 
+      // For Chapter 4 (Analysis), fetch and parse uploaded research data files
+      let uploadDataText = ""
+      if (chapterNumber === 4) {
+        const uploads = await fetchAndParseProjectUploads(projectId)
+        uploadDataText = formatUploadsForPrompt(uploads)
+      }
+
       const prompt = `Generate the complete Chapter ${chapterNumber} for my research on "${project.topic}".
 I am a ${project.academicLevel.toLowerCase()} student in ${project.department} at ${project.institution}.
 Methodology: ${project.methodology.replace(/_/g, " ")}.
 Citation: ${project.citationStyle} style.
 Generate comprehensive academic content with all required sections, properly formatted.
+${uploadDataText}
 
 CRITICAL CITATION REQUIREMENTS:
 - Every factual claim, theory, statistic, method, and finding MUST have an in-text citation (${project.citationStyle} format).
@@ -59,7 +68,8 @@ CRITICAL CITATION REQUIREMENTS:
 - Never write "Research shows..." without citing WHO showed it. Always: "According to Smith (2023)..." or "(Smith, 2023)".
 - End the chapter with a complete References section containing 20-30 entries.
 - Every in-text citation MUST have a matching Reference entry, and every Reference MUST be cited in-text.
-- Use realistic author names, journal names, years, DOIs, and page numbers.`
+- Use realistic author names, journal names, years, DOIs, and page numbers.
+${chapterNumber === 4 ? "\nIMPORTANT: Use the uploaded research data above to analyze, interpret, and discuss real findings. Reference specific data points, statistics, and patterns from the uploaded files." : ""}`
 
       const stream = createStreamResponse({
         model,

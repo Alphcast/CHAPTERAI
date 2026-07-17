@@ -183,3 +183,32 @@ CREATE POLICY "Public full access" ON "analysis"  FOR ALL USING (true) WITH CHEC
 CREATE POLICY "Public full access" ON "upload"    FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Public full access" ON "reference" FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Public full access" ON "export"    FOR ALL USING (true) WITH CHECK (true);
+
+-- -------------------------
+-- Supabase Storage — "uploads" bucket
+-- -------------------------
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('uploads', 'uploads', true)
+ON CONFLICT (id) DO NOTHING;
+
+-- Storage SELECT — anyone can read (public bucket)
+CREATE POLICY "Allow public reads"
+ON storage.objects
+FOR SELECT
+USING (bucket_id = 'uploads');
+
+-- Storage INSERT — allow uploads where path is {projectId}/{filename}
+CREATE POLICY "Allow public uploads"
+ON storage.objects
+FOR INSERT
+WITH CHECK (
+  bucket_id = 'uploads'
+  AND storage.foldername(name)[1] IS NOT NULL
+  AND storage.foldername(name)[2] IS NOT NULL
+);
+
+-- Storage DELETE — allow deletes (owner cleanup)
+CREATE POLICY "Allow public deletes"
+ON storage.objects
+FOR DELETE
+USING (bucket_id = 'uploads');
