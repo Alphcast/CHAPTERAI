@@ -119,6 +119,43 @@ Click **Deploy**. Vercel will:
 
 ---
 
+## Step 4: Local Vercel CLI Setup (Optional)
+
+If you prefer deploying from terminal instead of the Vercel dashboard:
+
+### 4.1 Install Vercel CLI
+
+```bash
+pnpm setup          # Add pnpm global bin to PATH (run once, then open new terminal)
+pnpm add -g vercel  # Install Vercel CLI globally
+```
+
+### 4.2 Login & Link
+
+```bash
+vercel login            # Opens browser to authenticate
+vercel link             # Link to your Vercel project (or create new)
+```
+
+### 4.3 Deploy from CLI
+
+```bash
+# Deploy to preview
+vercel
+
+# Deploy to production
+vercel --prod
+```
+
+### 4.4 Pull Env & Push DB Schema
+
+```bash
+vercel env pull .env.local   # Pull env vars locally
+npx prisma db push           # Push database schema to Supabase
+```
+
+---
+
 ## Step 4: Push Database Schema
 
 After first deploy, push the Prisma schema to your Supabase database:
