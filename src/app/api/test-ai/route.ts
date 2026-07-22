@@ -3,14 +3,25 @@ import { getModel, createStreamResponse, isAIConfigured, getAIErrorMessage } fro
 import { generateText } from "ai"
 
 export const runtime = "nodejs"
+export const maxDuration = 30
 
 export async function GET(request: Request) {
   const url = new URL(request.url)
   const mode = url.searchParams.get("mode") || "both"
 
+  const apiKeyPresent = !!process.env.OPENROUTER_API_KEY
+  const apiKeyPreview = process.env.OPENROUTER_API_KEY
+    ? process.env.OPENROUTER_API_KEY.slice(0, 12) + "..."
+    : "NOT SET"
+
   try {
     if (!isAIConfigured()) {
-      return NextResponse.json({ error: getAIErrorMessage() || "AI not configured" }, { status: 500 })
+      return NextResponse.json({
+        status: "FAIL",
+        apiKeyPresent,
+        apiKeyPreview,
+        error: getAIErrorMessage() || "AI not configured",
+      }, { status: 500 })
     }
 
     const model = getModel()
@@ -18,7 +29,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "getModel() returned null" }, { status: 500 })
     }
 
-    const results: Record<string, unknown> = { apiKeyPresent: true, modelPresent: true }
+    const results: Record<string, unknown> = { status: "OK", apiKeyPresent, apiKeyPreview, modelPresent: true }
 
     // Test 1: generateText (non-streaming)
     if (mode === "both" || mode === "generate") {

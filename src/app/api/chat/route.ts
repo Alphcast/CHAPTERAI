@@ -107,9 +107,14 @@ IMPORTANT: Use the uploaded research data above to analyze, interpret, and discu
 Analyze, interpret, and discuss the above uploaded data in your response. Reference specific findings from the data.`
     }
 
+    console.log("[Chat API] API key present:", !!process.env.OPENROUTER_API_KEY)
+    console.log("[Chat API] isFullChapterRequest:", isFullChapterRequest)
+
     const model = isFullChapterRequest ? getChapterModel() : getChatModel()
+    console.log("[Chat API] Model resolved:", !!model)
 
     if (model) {
+      console.log("[Chat API] Creating stream...")
       const stream = createStreamResponse({
         model,
         system,
@@ -117,6 +122,8 @@ Analyze, interpret, and discuss the above uploaded data in your response. Refere
         temperature: 0.7,
         maxTokens: isFullChapterRequest ? 8192 : 2048,
       })
+
+      console.log("[Chat API] Stream created:", !!stream)
 
       if (stream) {
         const encoder = new TextEncoder()
@@ -127,7 +134,10 @@ Analyze, interpret, and discuss the above uploaded data in your response. Refere
 
         ;(async () => {
           try {
+            console.log("[Chat API] Starting stream iteration...")
+            let chunkCount = 0
             for await (const chunk of stream.fullStream) {
+              chunkCount++
               if (chunk.type === "text-delta" && chunk.textDelta) {
                 fullResponse += chunk.textDelta
                 await writer.write(
@@ -137,6 +147,7 @@ Analyze, interpret, and discuss the above uploaded data in your response. Refere
                 console.error("[Chat API] Stream error chunk:", JSON.stringify(chunk))
               }
             }
+            console.log("[Chat API] Stream complete. Chunks:", chunkCount, "Length:", fullResponse.length)
 
             if (isFullChapterRequest && fullResponse) {
               await prisma.chapter.updateMany({
@@ -186,8 +197,10 @@ Analyze, interpret, and discuss the above uploaded data in your response. Refere
       }
     }
 
+    console.log("[Chat API] Model is null or stream failed, checking AI config...")
     if (!isAIConfigured()) {
       const errorMsg = getAIErrorMessage()
+      console.error("[Chat API] AI not configured:", errorMsg)
       return NextResponse.json(
         { error: errorMsg || "AI is not configured. Please add OPENROUTER_API_KEY in your Vercel project settings." },
         { status: 503 }

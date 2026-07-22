@@ -1,5 +1,5 @@
 import { createOpenAI } from "@ai-sdk/openai"
-import { streamText, type CoreMessage } from "ai"
+import { streamText, type CoreMessage, type CoreUserMessage, type CoreSystemMessage } from "ai"
 
 let cachedClient: ReturnType<typeof createOpenAI> | null = null
 
@@ -20,6 +20,7 @@ function getClient() {
   cachedClient = createOpenAI({
     apiKey,
     baseURL: "https://openrouter.ai/api/v1",
+    compatibility: "compatible",
   })
   return cachedClient
 }
