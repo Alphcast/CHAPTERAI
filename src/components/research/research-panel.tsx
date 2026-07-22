@@ -126,7 +126,7 @@ export function ResearchPanel({ projectId, onExport, exporting, onOpenSettings }
               Research Details
             </span>
             <button
-              onClick={onOpenSettings}
+              onClick={() => onOpenSettings?.()}
               className="flex h-6 w-6 items-center justify-center rounded-md hover:bg-muted transition-colors"
               title="Edit details"
             >
