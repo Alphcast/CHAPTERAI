@@ -2,7 +2,6 @@ import { prisma } from "@/lib/prisma"
 import { getChapterModel, createStreamResponse, isAIConfigured, getAIErrorMessage } from "@/lib/ai"
 import { getAgentForChapter } from "@/agents"
 import type { AgentContext } from "@/agents/types"
-import { fetchAndParseProjectUploads, formatUploadsForPrompt } from "@/lib/file-parser"
 
 export const runtime = "nodejs"
 export const maxDuration = 120
@@ -58,8 +57,13 @@ export async function POST(request: Request) {
 
       let uploadDataText = ""
       if (chapterNumber === 4) {
-        const uploads = await fetchAndParseProjectUploads(projectId)
-        uploadDataText = formatUploadsForPrompt(uploads)
+        try {
+          const { fetchAndParseProjectUploads, formatUploadsForPrompt } = await import("@/lib/file-parser")
+          const uploads = await fetchAndParseProjectUploads(projectId)
+          uploadDataText = formatUploadsForPrompt(uploads)
+        } catch (uploadError) {
+          console.error("[Generate Chapter] Upload parsing error (non-fatal):", uploadError)
+        }
       }
 
       const prompt = `Generate the complete Chapter ${chapterNumber} for my research on "${project.topic}".

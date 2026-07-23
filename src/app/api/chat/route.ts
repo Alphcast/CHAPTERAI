@@ -9,21 +9,20 @@ import {
 } from "@/lib/ai"
 import { getAgentForChapter } from "@/agents"
 import type { AgentContext } from "@/agents/types"
-import { fetchAndParseProjectUploads, formatUploadsForPrompt } from "@/lib/file-parser"
 
 export const runtime = "nodejs"
 export const maxDuration = 120
 
 export async function POST(request: Request) {
   const startTime = Date.now()
-  console.log("[Chat API] === Request received ===")
+  console.log("[CHAT-1] Request received")
 
   try {
     let body: Record<string, unknown>
     try {
       body = await request.json()
     } catch {
-      console.error("[Chat API] Failed to parse request body")
+      console.error("[CHAT-1] Failed to parse request body")
       return NextResponse.json(
         { error: "Invalid JSON in request body" },
         { status: 400 }
@@ -34,58 +33,97 @@ export async function POST(request: Request) {
     const chapterNumber = body.chapterNumber as number | undefined
     const content = body.content as string | undefined
 
+    console.log("[CHAT-2] Request body parsed:", {
+      projectId: !!projectId,
+      chapterNumber: !!chapterNumber,
+      contentLength: content?.length ?? 0,
+    })
+
     if (!projectId || !chapterNumber || !content) {
-      console.error("[Chat API] Missing fields:", { projectId: !!projectId, chapterNumber: !!chapterNumber, content: !!content })
+      console.error("[CHAT-3] Validation failed:", {
+        projectId: !!projectId,
+        chapterNumber: !!chapterNumber,
+        content: !!content,
+      })
       return NextResponse.json(
-        { error: `Missing required fields. projectId: ${!!projectId}, chapterNumber: ${!!chapterNumber}, content: ${!!content}` },
+        {
+          error: `Missing required fields. projectId: ${!!projectId}, chapterNumber: ${!!chapterNumber}, content: ${!!content}`,
+        },
         { status: 400 }
       )
     }
 
-    console.log(`[Chat API] projectId=${projectId} chapter=${chapterNumber} contentLength=${content.length}`)
+    console.log("[CHAT-3] Validation passed. projectId=%s chapter=%d contentLength=%d", projectId, chapterNumber, content.length)
+
+    console.log("[CHAT-4] Prisma client initialized:", !!prisma)
 
     let project
     try {
+      console.log("[CHAT-5] Project lookup started")
       project = await prisma.project.findUnique({
         where: { id: projectId },
       })
     } catch (dbError) {
-      console.error("[Chat API] DATABASE ERROR during project lookup:", dbError)
+      console.error("[CHAT-5] DATABASE ERROR during project lookup:", dbError)
       return NextResponse.json(
-        { error: "Database connection failed. Check DATABASE_URL in Vercel environment variables." },
+        {
+          error: "Database connection failed. Check DATABASE_URL in Vercel environment variables.",
+        },
         { status: 500 }
       )
     }
 
     if (!project) {
-      console.error("[Chat API] Project not found:", projectId)
+      console.error("[CHAT-5] Project not found:", projectId)
       return NextResponse.json({ error: "Project not found" }, { status: 404 })
     }
 
-    console.log("[Chat API] Project found:", project.topic)
+    console.log("[CHAT-6] Project found:", project.topic)
 
     try {
+      console.log("[CHAT-7] Saving user message")
       await prisma.message.create({
         data: { projectId, chapterNumber, role: "user", content },
       })
     } catch (dbError) {
-      console.error("[Chat API] DATABASE ERROR saving user message:", dbError)
+      console.error("[CHAT-7] DATABASE ERROR saving user message:", dbError)
       return NextResponse.json(
         { error: "Failed to save message to database." },
         { status: 500 }
       )
     }
 
-    const previousMessages = await prisma.message.findMany({
-      where: { projectId, chapterNumber },
-      orderBy: { createdAt: "asc" },
-      take: 20,
-    })
+    console.log("[CHAT-7] User message saved")
 
-    const completedChapters = await prisma.chapter.findMany({
-      where: { projectId, status: "COMPLETE" },
-      orderBy: { chapterNumber: "asc" },
-    })
+    let previousMessages
+    try {
+      console.log("[CHAT-8] Loading previous messages")
+      previousMessages = await prisma.message.findMany({
+        where: { projectId, chapterNumber },
+        orderBy: { createdAt: "asc" },
+        take: 20,
+      })
+    } catch (dbError) {
+      console.error("[CHAT-8] DATABASE ERROR loading messages:", dbError)
+      return NextResponse.json(
+        { error: "Failed to load message history." },
+        { status: 500 }
+      )
+    }
+
+    console.log("[CHAT-8] Previous messages loaded:", previousMessages.length)
+
+    let completedChapters: Awaited<ReturnType<typeof prisma.chapter.findMany>> = []
+    try {
+      console.log("[CHAT-9] Loading chapter context")
+      completedChapters = await prisma.chapter.findMany({
+        where: { projectId, status: "COMPLETE" },
+        orderBy: { chapterNumber: "asc" },
+      })
+    } catch (dbError) {
+      console.error("[CHAT-9] DATABASE ERROR loading chapters:", dbError)
+      completedChapters = []
+    }
 
     const generatedChapters: Record<number, string> = {}
     for (const ch of completedChapters) {
@@ -93,6 +131,8 @@ export async function POST(request: Request) {
         generatedChapters[ch.chapterNumber] = ch.content.slice(0, 3000)
       }
     }
+
+    console.log("[CHAT-9] Chapter context loaded:", Object.keys(generatedChapters).length, "completed chapters")
 
     const agentContext: AgentContext = {
       projectId,
@@ -104,9 +144,14 @@ export async function POST(request: Request) {
       institution: project.institution,
       country: project.country,
       chapterNumber,
-      previousMessages: previousMessages.map((m) => ({ role: m.role, content: m.content })),
+      previousMessages: previousMessages.map((m) => ({
+        role: m.role,
+        content: m.content,
+      })),
       generatedChapters,
     }
+
+    console.log("[CHAT-10] Agent context created")
 
     const isFullChapterRequest =
       content.toLowerCase().includes("generate complete") ||
@@ -121,10 +166,15 @@ export async function POST(request: Request) {
     let uploadDataText = ""
     if (chapterNumber === 4) {
       try {
+        console.log("[CHAT-10b] Loading chapter 4 uploads (lazy import)")
+        const { fetchAndParseProjectUploads, formatUploadsForPrompt } = await import(
+          "@/lib/file-parser"
+        )
         const uploads = await fetchAndParseProjectUploads(projectId)
         uploadDataText = formatUploadsForPrompt(uploads)
+        console.log("[CHAT-10b] Upload data loaded:", uploadDataText.length, "chars")
       } catch (uploadError) {
-        console.error("[Chat API] Upload parsing error (non-fatal):", uploadError)
+        console.error("[CHAT-10b] Upload parsing error (non-fatal):", uploadError)
       }
     }
 
@@ -151,22 +201,27 @@ IMPORTANT: Use the uploaded research data above to analyze, interpret, and discu
 Analyze, interpret, and discuss the above uploaded data in your response. Reference specific findings from the data.`
     }
 
-    const apiKeyPresent = !!process.env.OPENROUTER_API_KEY || !!process.env.OPENAI_API_KEY
-    console.log("[Chat API] API key present:", apiKeyPresent)
+    const apiKeyPresent =
+      !!process.env.OPENROUTER_API_KEY || !!process.env.OPENAI_API_KEY
+    console.log("[CHAT-11] AI model initialization started. API key present:", apiKeyPresent)
 
     const model = isFullChapterRequest ? getChapterModel() : getChatModel()
-    console.log("[Chat API] Model initialized:", !!model)
+    console.log("[CHAT-12] AI model initialized:", !!model)
 
     if (!model) {
       const errorMsg = getAIErrorMessage()
-      console.error("[Chat API] Model is null. AI not configured.")
+      console.error("[CHAT-12] Model is null. AI not configured.")
       return NextResponse.json(
-        { error: errorMsg || "AI model could not be initialized. Add OPENROUTER_API_KEY in Vercel." },
+        {
+          error:
+            errorMsg ||
+            "AI model could not be initialized. Add OPENROUTER_API_KEY in Vercel.",
+        },
         { status: 503 }
       )
     }
 
-    console.log("[Chat API] Creating AI stream...")
+    console.log("[CHAT-13] OpenRouter request started")
     const stream = createStreamResponse({
       model,
       system,
@@ -176,19 +231,18 @@ Analyze, interpret, and discuss the above uploaded data in your response. Refere
     })
 
     if (!stream) {
-      console.error("[Chat API] createStreamResponse returned null")
+      console.error("[CHAT-13] createStreamResponse returned null")
       return NextResponse.json(
         { error: "Failed to initialize AI stream." },
         { status: 500 }
       )
     }
 
-    console.log("[Chat API] Stream created, starting response...")
+    console.log("[CHAT-13] Stream created, beginning iteration")
 
     const encoder = new TextEncoder()
     let fullResponse = ""
     let hasStreamError = false
-    let streamErrorMessage = ""
 
     const { readable, writable } = new TransformStream()
     const writer = writable.getWriter()
@@ -200,52 +254,96 @@ Analyze, interpret, and discuss the above uploaded data in your response. Refere
           chunkCount++
 
           if (chunk.type === "text-delta" && chunk.textDelta) {
+            if (chunkCount === 1) {
+              console.log("[CHAT-14] First AI chunk received")
+            }
             fullResponse += chunk.textDelta
             await writer.write(
-              encoder.encode(JSON.stringify({ type: "text", content: chunk.textDelta }) + "\n")
+              encoder.encode(
+                JSON.stringify({ type: "text", content: chunk.textDelta }) + "\n"
+              )
             )
           } else if (chunk.type === "error") {
             const errorObj = (chunk as { error?: unknown }).error
-            const errorMsg = errorObj instanceof Error ? errorObj.message : JSON.stringify(errorObj)
-            console.error("[Chat API] Stream error chunk:", errorMsg)
+            const errorMsg =
+              errorObj instanceof Error
+                ? errorObj.message
+                : JSON.stringify(errorObj)
+            console.error("[CHAT-14] Stream error chunk:", errorMsg)
             hasStreamError = true
-            streamErrorMessage = errorMsg
             await writer.write(
-              encoder.encode(JSON.stringify({ type: "error", content: `AI provider error: ${errorMsg}` }) + "\n")
+              encoder.encode(
+                JSON.stringify({
+                  type: "error",
+                  content: `AI provider error: ${errorMsg}`,
+                }) + "\n"
+              )
             )
             break
           } else if (chunk.type === "step-finish") {
-            console.log("[Chat API] Step finished, reason:", (chunk as { finishReason?: string }).finishReason)
+            console.log(
+              "[CHAT-14] Step finished:",
+              (chunk as { finishReason?: string }).finishReason
+            )
           }
         }
 
-        console.log("[Chat API] Stream iteration done. chunks=", chunkCount, "length=", fullResponse.length, "error=", hasStreamError)
+        console.log(
+          "[CHAT-15] AI stream completed. chunks=%d length=%d error=%s",
+          chunkCount,
+          fullResponse.length,
+          hasStreamError
+        )
 
         if (!hasStreamError && fullResponse.length === 0) {
-          console.error("[Chat API] AI returned empty response")
+          console.error("[CHAT-15] AI returned empty response")
           await writer.write(
-            encoder.encode(JSON.stringify({ type: "error", content: "AI returned an empty response. Try a different message." }) + "\n")
+            encoder.encode(
+              JSON.stringify({
+                type: "error",
+                content: "AI returned an empty response. Try a different message.",
+              }) + "\n"
+            )
           )
         } else if (!hasStreamError && fullResponse.length > 0) {
-          if (isFullChapterRequest) {
-            await prisma.chapter.updateMany({
-              where: { projectId, chapterNumber },
-              data: { content: fullResponse, status: "COMPLETE" },
+          try {
+            if (isFullChapterRequest) {
+              await prisma.chapter.updateMany({
+                where: { projectId, chapterNumber },
+                data: { content: fullResponse, status: "COMPLETE" },
+              })
+            }
+
+            await prisma.message.create({
+              data: {
+                projectId,
+                chapterNumber,
+                role: "assistant",
+                content: fullResponse,
+              },
             })
+
+            console.log("[CHAT-16] Assistant response saved")
+          } catch (saveError) {
+            console.error("[CHAT-16] Failed to save assistant response:", saveError)
           }
 
-          await prisma.message.create({
-            data: { projectId, chapterNumber, role: "assistant", content: fullResponse },
-          })
-
           await writer.write(
-            encoder.encode(JSON.stringify({ type: "done", messageId: "stream-complete" }) + "\n")
+            encoder.encode(
+              JSON.stringify({
+                type: "done",
+                messageId: "stream-complete",
+              }) + "\n"
+            )
           )
 
-          console.log("[Chat API] === Request complete ===", Date.now() - startTime, "ms")
+          console.log(
+            "[CHAT-16] === Request complete === %dms",
+            Date.now() - startTime
+          )
         }
       } catch (error) {
-        console.error("[Chat API] Stream processing error:", error)
+        console.error("[CHAT-15] Stream processing error:", error)
         const errorMessage =
           error instanceof Error ? error.message : "Unknown stream error"
         try {
@@ -274,12 +372,12 @@ Analyze, interpret, and discuss the above uploaded data in your response. Refere
       },
     })
   } catch (error) {
-    console.error("[Chat API] Fatal error:", error)
+    console.error("[CHAT-FATAL]", {
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    })
     const message =
-      error instanceof Error ? error.message : "Failed to process message"
-    return NextResponse.json(
-      { error: message },
-      { status: 500 }
-    )
+      error instanceof Error ? error.message : "Internal chat server error"
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }

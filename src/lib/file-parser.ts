@@ -87,7 +87,6 @@ function parseText(buffer: Buffer): string {
 
 async function parsePDF(buffer: Buffer): Promise<string> {
   if (typeof globalThis.DOMMatrix === "undefined") {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ;(globalThis as any).DOMMatrix = class DOMMatrix {
       constructor() {}
       multiply() { return this }
@@ -97,9 +96,7 @@ async function parsePDF(buffer: Buffer): Promise<string> {
       toString() { return "" }
     }
   }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   if (typeof globalThis.ImageData === "undefined") {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ;(globalThis as any).ImageData = class ImageData {
       constructor(public data: Uint8ClampedArray, public width: number, public height: number) {}
     }
