@@ -1,5 +1,5 @@
 import { createOpenAI } from "@ai-sdk/openai"
-import { streamText, type CoreMessage, type CoreUserMessage, type CoreSystemMessage } from "ai"
+import { streamText } from "ai"
 
 let cachedClient: ReturnType<typeof createOpenAI> | null = null
 
@@ -11,12 +11,7 @@ function getClient() {
   if (cachedClient) return cachedClient
 
   const apiKey = getApiKey()
-  if (!apiKey) {
-    console.error(
-      "[AI] No API key found. Set OPENROUTER_API_KEY or OPENAI_API_KEY in your Vercel environment variables."
-    )
-    return null
-  }
+  if (!apiKey) return null
   cachedClient = createOpenAI({
     apiKey,
     baseURL: "https://openrouter.ai/api/v1",
@@ -31,7 +26,7 @@ export function isAIConfigured(): boolean {
 
 export function getAIErrorMessage(): string {
   if (!getApiKey()) {
-    return "AI is not configured. Please add OPENROUTER_API_KEY in your Vercel project settings → Environment Variables."
+    return "AI is not configured. Add OPENROUTER_API_KEY (or OPENAI_API_KEY) in Vercel → Settings → Environment Variables, then redeploy."
   }
   return ""
 }
@@ -50,6 +45,8 @@ export function getModel() {
   return getChatModel()
 }
 
+export type StreamResult = ReturnType<typeof streamText>
+
 export function createStreamResponse({
   model,
   system,
@@ -57,53 +54,12 @@ export function createStreamResponse({
   temperature = 0.7,
   maxTokens = 4096,
 }: {
-  model: ReturnType<typeof getModel>
+  model: NonNullable<ReturnType<typeof getChatModel>>
   system: string
   prompt: string
   temperature?: number
   maxTokens?: number
-}) {
+}): StreamResult | null {
   if (!model) return null
-
-  try {
-    return streamText({
-      model,
-      system,
-      prompt,
-      temperature,
-      maxTokens,
-    })
-  } catch (error) {
-    console.error("[AI] Failed to create stream:", error)
-    return null
-  }
-}
-
-export function createChatStreamResponse({
-  model,
-  system,
-  messages,
-  temperature = 0.7,
-  maxTokens = 4096,
-}: {
-  model: ReturnType<typeof getModel>
-  system: string
-  messages: CoreMessage[]
-  temperature?: number
-  maxTokens?: number
-}) {
-  if (!model) return null
-
-  try {
-    return streamText({
-      model,
-      system,
-      messages,
-      temperature,
-      maxTokens,
-    })
-  } catch (error) {
-    console.error("[AI] Failed to create chat stream:", error)
-    return null
-  }
+  return streamText({ model, system, prompt, temperature, maxTokens })
 }

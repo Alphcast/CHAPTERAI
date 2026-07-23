@@ -178,8 +178,8 @@ export function ChatArea({ projectId, chapterNumber }: ChatAreaProps) {
       }
     } catch (err: unknown) {
       if (err instanceof Error && err.name !== "AbortError") {
-        console.error("Stream error:", err)
-        toast.error("Failed to generate response")
+        console.error("Stream error:", err.message)
+        toast.error(err.message || "Failed to generate response")
       }
     } finally {
       setIsStreaming(false)

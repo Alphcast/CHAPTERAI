@@ -20,7 +20,6 @@ export function createAgent(params: {
       let system = this.systemPrompt(agentCtx)
       const toolCalls: ToolCall[] = []
 
-      // Inject prior chapter content so agents can reference and build upon prior work
       if (agentCtx.generatedChapters && Object.keys(agentCtx.generatedChapters).length > 0) {
         const chaptersContext = Object.entries(agentCtx.generatedChapters)
           .map(([num, content]) => `--- Chapter ${num} (prior work, for reference only — do not repeat) ---\n${content}`)
@@ -53,7 +52,8 @@ export function createAgent(params: {
               fullContent += chunk.textDelta
             }
             if (chunk.type === "error") {
-              console.error("[BaseAgent] Stream error chunk:", JSON.stringify(chunk))
+              const errorObj = (chunk as { error?: unknown }).error
+              console.error("[BaseAgent] Stream error:", errorObj instanceof Error ? errorObj.message : JSON.stringify(errorObj))
               hasError = true
             }
             if (chunk.type === "tool-call" && chunk.toolName) {
@@ -78,7 +78,7 @@ export function createAgent(params: {
           }
 
           if (hasError && !fullContent) {
-            return { content: "I encountered an error generating a response. Please try again with a shorter message.", toolCalls }
+            return { content: "The AI provider returned an error. Please check your API key and try again.", toolCalls }
           }
 
           return { content: fullContent, toolCalls }
@@ -140,7 +140,7 @@ Identify gaps in the existing literature that justify the present study.
     "methodology": `I am acting as the **Methodology Agent** for "${topic}".
 
 **Recommended Methodology:**
-- Research Design: ${(context.methodology as string)?.replace(/_/g, " ") || "Appropriate design"} 
+- Research Design: ${(context.methodology as string)?.replace(/_/g, " ") || "Appropriate design"}
 - Population: Define the target population for this study
 - Sample: Calculate appropriate sample size
 - Instrument: Develop or adapt appropriate data collection instruments
